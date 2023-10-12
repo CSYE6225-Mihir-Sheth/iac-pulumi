@@ -1,0 +1,15 @@
+encryptionsalt: v1:m4TrSzeXRNw=:v1:1vw71uiWg3m+/CUJ:CXieb8zi1J4lb9oPVkvhW1/o25xbzQ==
+config:
+  aws:region: us-east-1
+  iac-pulumi:VPC_NAME: cd_vpc
+  iac-pulumi:VPC_CIDR: 10.0.0.0/16
+  iac-pulumi:NO_OF_MAX_SUBNETS: 3
+  iac-pulumi:PRIVATE_SUBNET_NAME: pvt-subnet-
+  iac-pulumi:PUBLIC_SUBNET_NAME: pbc-subnet-
+  iac-pulumi:SUB_CIDR: 10.0.0.0/24
+  iac-pulumi:INTERNET_GATEWAY_NAME: cd_ig
+  iac-pulumi:PRIVATE_ROUTE_TABLE_NAME: pvt_route_table
+  iac-pulumi:PUBLIC_ROUTE_TABLE_NAME: pbc_route_table
+  iac-pulumi:ROUTE TO INTERNET: 0.0.0.0/0
+  iac-pulumi:PRIVATE_ASSOCIATION_NAME: pvt_route_table-assn-
+  iac-pulumi:PUBLIC_ASSOCIATION_NAME: pbc_route_table-asson-
