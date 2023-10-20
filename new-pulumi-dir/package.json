@@ -1,6 +1,7 @@
 {
   "name": "new-pulumi-dir",
   "main": "index.js",
+  "type": "module",
   "dependencies": {
     "@pulumi/aws": "^6.4.1",
     "@pulumi/awsx": "^1.0.0",

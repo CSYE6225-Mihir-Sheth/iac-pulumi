@@ -1,118 +1,184 @@
-const pulumi = require("@pulumi/pulumi");
-const aws = require("@pulumi/aws");
-const config = new pulumi.Config();
-// Load configurations
-//onst config = new pulumi.Config();
+import * as pulumi from "@pulumi/pulumi";
+import * as aws from "@pulumi/aws";
+import yaml from "js-yaml";
+import * as fs from "fs";
 
-//const AWS_REGION = config.require("aws:region");
+const stack = pulumi.getStack();
+const configFile = fs.readFileSync(`Pulumi.${stack}.yaml`, 'utf8');
+const config = yaml.safeLoad(configFile);
 
-
-const vpcCidr = config.require("VPC_CIDR");
-const basePublicSubnetCidr = config.require("SUB_CIDR");
-const basePrivateSubnetCidr = basePublicSubnetCidr;
-
-// const provider = new aws.Provider("myProvider", {
-//     region: AWS_REGION,
-// });
-
-// Create VPC
-const vpc = new aws.ec2.Vpc(config.require("VPC_NAME"), {
-    cidrBlock: vpcCidr,
-    // enableDnsSupport: true,
-    // enableDnsHostnames: true,
+// Creating VPC
+const myvpc = new aws.ec2.Vpc(config.config['iac-pulumi:vpc_name'], {
+    cidrBlock: config.config['iac-pulumi:vpc_cidrBlock'],
     tags: {
-        "Name": config.require("VPC_NAME")
+        Name: config.config['iac-pulumi:vpc_name'],
+    },
+});
+
+// Creating subnet 
+
+// Create public subnets
+const iam_publicSubnets = [];
+const iam_privateSubnets = [];
+const available = aws.getAvailabilityZones({
+    state: "available",
+});
+
+available.then(available => {
+    
+    const zoneCount = Math.min((available.names?.length || 0),parseInt(config.config['iac-pulumi:no_of_max_subnets']));
+    const arr = config.config['iac-pulumi:sub_cidr'].split(".");
+    for (let i = 0; i < zoneCount; i++) {
+        // Create public subnets
+        
+        const subpubName = config.config['iac-pulumi:public_subnet_name'] + i;
+        console.log(subpubName)
+        const subpubCidr = arr[0] + "." + arr[1] + "." + i + "." + arr[3];
+        const publicsubnet = new aws.ec2.Subnet(subpubName, {
+            vpcId: myvpc.id,
+            availabilityZone: available.names?.[i],
+            cidrBlock: subpubCidr,
+            mapPublicIpOnLaunch: true,
+            tags: {
+                Name: subpubName,
+            },
+        });
+
+        iam_publicSubnets.push(publicsubnet);
+
+        const host = i + zoneCount
+        // Create private subnets
+        const subpriCidr = arr[0] + "." + arr[1] + "." + host + "." + arr[3];
+        const subPrivateName = config.config['iac-pulumi:private_subnet_name'] + i;
+        const privatesubnet = new aws.ec2.Subnet(subPrivateName, {
+            vpcId: myvpc.id,
+            availabilityZone: available.names?.[i],
+            cidrBlock: subpriCidr,
+            tags: {
+                Name: subPrivateName,
+            },
+        });
+
+        iam_privateSubnets.push(privatesubnet);
     }
-});
 
-// Create an Internet Gateway
-const internetGateway = new aws.ec2.InternetGateway(config.get("iac-pulumi:INTERNET_GATEWAY_NAME") || "customVpcIGW", {
-    tags: {
-        "Name": config.get("iac-pulumi:INTERNET_GATEWAY_NAME") || "cloud_VpcIGW"
-    }
-});
-
-// Attach the Internet Gateway to the VPC
-const vpcIgAttachment = new aws.ec2.InternetGatewayAttachment("customVpcIGWAttachment", {
-    vpcId: vpc.id,
-    internetGatewayId: internetGateway.id,
-});
-
-// Determine the availability zones using the AWS_REGION
-aws.getAvailabilityZones({  state: "available" }).then(azs => {
-    const maxZones = 3;
-    const numberOfZones = Math.min(azs.names.length, maxZones);
-
-    let publicSubnets = [];
-    let privateSubnets = [];
-
-    let cidrCounter = 1; // Start from 1 for 10.0.0.1/24
-
-// Create subnets across the restricted number of AZs
-for (let i = 0; i < numberOfZones; i++) {
-    // Public Subnets
-    const publicSubnetCidr = `10.0.${cidrCounter}.0/24`;
-    const publicSubnet = new aws.ec2.Subnet(`${config.get("iac-pulumi:PUBLIC_SUBNET_NAME") || "publicSubnet-"}${i}`, {
-        vpcId: vpc.id,
-        cidrBlock: publicSubnetCidr,
-        availabilityZone: azs.names[i],
-        mapPublicIpOnLaunch: true,
+    // Creating internet gateway
+    const internet = new aws.ec2.InternetGateway(config.config['iac-pulumi:internet_gateway_name'], {
+        vpcId: myvpc.id,
         tags: {
-            "Name": `${config.get("iac-pulumi:PUBLIC_SUBNET_NAME") || "publicSubnet-"}${i}`
-        }
+            Name: config.config['iac-pulumi:internet_gateway_name'],
+        },
     });
-    publicSubnets.push(publicSubnet);
-    cidrCounter++;
 
-    // Private Subnets
-    const privateSubnetCidr = `10.0.${cidrCounter}.0/24`;
-    const privateSubnet = new aws.ec2.Subnet(`${config.get("iac-pulumi:PRIVATE_SUBNET_NAME") || "privateSubnet-"}${i}`, {
-        vpcId: vpc.id,
-        cidrBlock: privateSubnetCidr,
-        availabilityZone: azs.names[i],
+    // Create a public route table
+    const publicRouteTable = new aws.ec2.RouteTable(config.config['iac-pulumi:public_route_table_name'], {
+        vpcId: myvpc.id,
         tags: {
-            "Name": `${config.get("iac-pulumi:PRIVATE_SUBNET_NAME") || "privateSubnet-"}${i}`
-        }
+            Name: config.config['iac-pulumi:public_route_table_name'],
+        },
     });
-    privateSubnets.push(privateSubnet);
-    cidrCounter++;
-}
 
+    // Attach all public subnets to the public route table
+    iam_publicSubnets.forEach((subnet, index) => {
+        let pubAssociationNmae = config.config['iac-pulumi:public_association_name'] + index
+        const routeTable = new aws.ec2.RouteTableAssociation(pubAssociationNmae, {
+            routeTableId: publicRouteTable.id,
+            subnetId: subnet.id,
+        });
+    });
 
-    // Create a public route table and attach all public subnets to it
-const publicRouteTableName = config.get("iac-pulumi:PUBLIC_ROUTE_TABLE_NAME") || "publicRouteTable";
-const publicRouteTable = new aws.ec2.RouteTable(publicRouteTableName, {
-    vpcId: vpc.id,
-});
+    // Create a private route table
+    const privRouteTable = new aws.ec2.RouteTable(config.config['iac-pulumi:private_route_table_name'], {
+        vpcId: myvpc.id,
+        tags: {
+            Name: config.config['iac-pulumi:private_route_table_name'],
+        },
+    });
 
-for (let i = 0; i < publicSubnets.length; i++) {
-    new aws.ec2.RouteTableAssociation(`${config.get("iac-pulumi:PUBLIC_ASSOCIATION_NAME") || "publicRouteTableAssociation-"}${i}`, {
-        subnetId: publicSubnets[i].id,
+    // Attach all private subnets to the private route table
+    iam_privateSubnets.forEach((subnet, index) => {
+        let priAssociationNmae = config.config['iac-pulumi:private_association_name'] + index
+        const routeTable = new aws.ec2.RouteTableAssociation(priAssociationNmae, {
+            routeTableId: privRouteTable.id,
+            subnetId: subnet.id,
+        });
+    });
+
+    const publicRoute = new aws.ec2.Route(config.config['iac-pulumi:public_route_name'], {
         routeTableId: publicRouteTable.id,
+        destinationCidrBlock: config.config['iac-pulumi:route_to_internet'],
+        gatewayId: internet.id,
+        tags: {
+            Name: config.config['iac-pulumi:public_route_name'],
+        },
     });
-}
 
-// new aws.ec2.Route("publicRoute", {
-//     routeTableId: publicRouteTable.id,
-//     destinationCidrBlock: config.get("iac-pulumi:ROUTE TO INTERNET") || "0.0.0.0/0",
-//     gatewayId: internetGateway.id,
-// });
+    // Create an EC2 security group for web applications
+    const appSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:security_group_name'], {
+    vpcId: myvpc.id,
+    description: "Security group for web applications",
+    ingress: [
+      {
+        fromPort: config.config['iac-pulumi:ssh_from_port'], //SSH
+        toPort: config.config['iac-pulumi:ssh_to_port'],
+        protocol: config.config['iac-pulumi:protocol'],
+        cidrBlocks: [config.config['iac-pulumi:ssh_ip']], 
+      },
+      {
+        fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
+        toPort: config.config['iac-pulumi:http_to_port'],
+        protocol: config.config['iac-pulumi:protocol'],
+        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
+      },
+      {
+        fromPort: config.config['iac-pulumi:https_from_port'], //HTTPS
+        toPort: config.config['iac-pulumi:https_to_port'],
+        protocol: config.config['iac-pulumi:protocol'],
+        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
+      },
+      {
+        fromPort: config.config['iac-pulumi:your_from_port'], //your port
+        toPort: config.config['iac-pulumi:your_to_port'],
+        protocol: config.config['iac-pulumi:protocol'],
+        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
+      },
+    ],
+    tags: {
+        Name: config.config['iac-pulumi:security_group_name'],
+    },
+  });
 
-// Create a private route table and attach all private subnets to it
-const privateRouteTableName = config.get("iac-pulumi:PRIVATE_ROUTE_TABLE_NAME") || "privateRouteTable";
-const privateRouteTable = new aws.ec2.RouteTable(privateRouteTableName, {
-    vpcId: vpc.id,
+  const ami = aws.ec2.getAmi({
+    filters: [
+        {
+            name: config.config['iac-pulumi:ami_name'],
+            values: [config.config['iac-pulumi:ami_name_value']],
+        },
+        {
+            name: config.config['iac-pulumi:root_device_type_tag'],
+            values: [config.config['iac-pulumi:root_device_type_tag_value']],
+        },
+        {
+            name: config.config['iac-pulumi:virtualization_tag'],
+            values: [config.config['iac-pulumi:virtualization_tag_value']],
+        },
+    ],
+    mostRecent: true,
+    owners: [config.config['iac-pulumi:owner']],
 });
 
-for (let i = 0; i < privateSubnets.length; i++) {
-    new aws.ec2.RouteTableAssociation(`${config.get("iac-pulumi:PRIVATE_ASSOCIATION_NAME") || "privateRouteTableAssociation-"}${i}`, {
-        subnetId: privateSubnets[i].id,
-        routeTableId: privateRouteTable.id,
-    });
-}
-
-}).catch(err => {
-    console.error("Error fetching availability zones:", err);
+const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+    ami: ami.then(i => i.id),
+    instanceType: config.config['iac-pulumi:instance_type'],
+    subnetId: iam_publicSubnets[0],
+    keyName: config.config['iac-pulumi:key_value'],
+    associatePublicIpAddress: true,
+    vpcSecurityGroupIds: [
+        appSecurityGroup.id,
+    ]
 });
 
-// export const vpcId = vpc.id;
+});
