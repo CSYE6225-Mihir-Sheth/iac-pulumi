@@ -170,15 +170,109 @@ available.then(available => {
     owners: [config.config['iac-pulumi:owner']],
 });
 
-const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
-    ami: ami.then(i => i.id),
-    instanceType: config.config['iac-pulumi:instance_type'],
-    subnetId: iam_publicSubnets[0],
-    keyName: config.config['iac-pulumi:key_value'],
-    associatePublicIpAddress: true,
-    vpcSecurityGroupIds: [
-        appSecurityGroup.id,
-    ]
+// const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+//     ami: ami.then(i => i.id),
+//     instanceType: config.config['iac-pulumi:instance_type'],
+//     subnetId: iam_publicSubnets[0],
+//     keyName: config.config['iac-pulumi:key_value'],
+//     associatePublicIpAddress: true,
+//     vpcSecurityGroupIds: [
+//         appSecurityGroup.id,
+//     ]
+
+// });
+  //rds parameter group
+
+  const rdsParameterGroup = new aws.rds.ParameterGroup("rds-parameter-group", {
+    vpcId: myvpc.id,
+    description: "Custom parameter group for csye6225",
+family: "mysql8.0",
+parameters: [
+    {
+        name: "character_set_server",
+        value: "utf8"
+    },
+    {
+        name: "character_set_client",
+        value: "utf8"
+    }
+]
+ 
 });
 
+const privateGroup = iam_privateSubnets.map(subnet => subnet.id)
+//RDS Subnet Group
+const rdsSubnetGroup = new aws.rds.SubnetGroup(config.config['iac-pulumi:rds_subnet_group_name'], {
+    subnetIds: privateGroup,
+    description: "Subnet group for RDS instance",
+    tags: {
+        Name: config.config['iac-pulumi:rds_subnet_group_name'],
+    },
+});
+
+//RDS Security Group
+const rdsSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:db_security_group_name'],{
+    vpcId: myvpc.id,
+    description: "RDS database security group",
+    ingress: [
+        {   
+            fromPort: config.config['iac-pulumi:db_to_port'], //your port
+            toPort: config.config['iac-pulumi:db_to_port'],
+            protocol: config.config['iac-pulumi:protocol'],
+            // protocol: "tcp", // Use TCP for database
+            // fromPort: config.config("iac-pulumi:db_from_port"),
+            // toPort: config.config("iac-pulumi:db_to_port"),
+
+            securityGroups: [appSecurityGroup], // Reference to the application security group
+        },
+    ],
+    egress: [
+        {
+            protocol: "-1", // Allow all outbound traffic
+            fromPort: 0,
+            toPort: 0,
+            cidrBlocks: ["0.0.0.0/0"],  // Allowing all outbound internet access
+        },
+    ],
+});
+
+
+
+const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_name"], {
+    allocatedStorage: config.config['iac-pulumi:db_allocated_storage'],
+    storageType: config.config['iac-pulumi:db_storage_type'],
+    engine: config.config['iac-pulumi:db_engine'],
+    engineVersion: config.config['iac-pulumi:db_engine_version'],
+    skipFinalSnapshot: config.config['iac-pulumi:db_skip_final_snapshot'],
+    instanceClass: config.config['iac-pulumi:db_instance_class'],
+    multiAz: config.config['iac-pulumi:multi_az'],
+    dbName: config.config['iac-pulumi:db_name'],
+    username: config.config['iac-pulumi:username'],
+    password: config.config['iac-pulumi:password'],
+    parameterGroupName: config.config ['db_parameter_group_name'],
+    dbSubnetGroupName: rdsSubnetGroup.name,
+    vpcSecurityGroupIds: [rdsSecurityGroup.id, appSecurityGroup.id],
+    publiclyAccessible: config.config['iac-pulumi:publiclyAccessible'],
+})
+
+rdsInstance.endpoint.apply(endpoint => {
+    const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+        ami: ami.then(i => i.id),
+        instanceType: config.config['iac-pulumi:instance_type'],
+        subnetId: iam_publicSubnets[0],
+        keyName: config.config['iac-pulumi:key_value'],
+        associatePublicIpAddress: true,
+        vpcSecurityGroupIds: [
+            appSecurityGroup.id,
+            rdsSecurityGroup.id,
+        ],
+        userData: pulumi.interpolate`#!/bin/bash
+            echo "host=${endpoint}" >> /home/admin/opt/webapp/.env
+            echo "user=root" >> /home/admin/opt/webapp/.env
+            echo "password=12345678" >> /home/admin/opt/webapp/.env
+            echo "port=3000" >> /home/admin/opt/webapp/.env
+            echo "dialect=mysql" >> /home/admin/opt/webapp/.env
+            echo "database=cloud_db" >> /home/admin/opt/webapp/.env`
+    });
+});
 });
