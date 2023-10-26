@@ -146,6 +146,14 @@ available.then(available => {
         ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
       },
     ],
+    egress: [
+        {
+            protocol: config.config['iac-pulumi:int_protocol'], 
+            fromPort: config.config['iac-pulumi:int_fromPort'],
+            toPort: config.config['iac-pulumi:int_toPort'],
+            cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],   
+        },
+    ],
     tags: {
         Name: config.config['iac-pulumi:security_group_name'],
     },
@@ -192,10 +200,6 @@ parameters: [
         name: "character_set_server",
         value: "utf8"
     },
-    {
-        name: "character_set_client",
-        value: "utf8"
-    }
 ]
  
 });
@@ -223,19 +227,19 @@ const rdsSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:db_
             // fromPort: config.config("iac-pulumi:db_from_port"),
             // toPort: config.config("iac-pulumi:db_to_port"),
 
-            securityGroups: [appSecurityGroup], // Reference to the application security group
+            securityGroups: [appSecurityGroup.id], // Reference to the application security group
         },
     ],
     egress: [
         {
-            protocol: "-1", // Allow all outbound traffic
-            fromPort: 0,
-            toPort: 0,
-            cidrBlocks: ["0.0.0.0/0"],  // Allowing all outbound internet access
+            protocol: config.config['iac-pulumi:int_protocol'], 
+            fromPort: config.config['iac-pulumi:int_fromPort'],
+            toPort: config.config['iac-pulumi:int_toPort'],
+            cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],   
         },
     ],
+    
 });
-
 
 
 const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_name"], {
@@ -251,11 +255,12 @@ const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_n
     password: config.config['iac-pulumi:password'],
     parameterGroupName: config.config ['db_parameter_group_name'],
     dbSubnetGroupName: rdsSubnetGroup.name,
-    vpcSecurityGroupIds: [rdsSecurityGroup.id, appSecurityGroup.id],
+    vpcSecurityGroupIds: [rdsSecurityGroup.id],
     publiclyAccessible: config.config['iac-pulumi:publiclyAccessible'],
 })
 
 rdsInstance.endpoint.apply(endpoint => {
+    const envFile = config.config['iac-pulumi:db_env_path']
     const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
         ami: ami.then(i => i.id),
         instanceType: config.config['iac-pulumi:instance_type'],
@@ -264,15 +269,17 @@ rdsInstance.endpoint.apply(endpoint => {
         associatePublicIpAddress: true,
         vpcSecurityGroupIds: [
             appSecurityGroup.id,
-            rdsSecurityGroup.id,
         ],
         userData: pulumi.interpolate`#!/bin/bash
-            echo "host=${endpoint}" >> /home/admin/opt/webapp/.env
-            echo "user=root" >> /home/admin/opt/webapp/.env
-            echo "password=12345678" >> /home/admin/opt/webapp/.env
-            echo "port=3000" >> /home/admin/opt/webapp/.env
-            echo "dialect=mysql" >> /home/admin/opt/webapp/.env
-            echo "database=cloud_db" >> /home/admin/opt/webapp/.env`
+            echo "host=${endpoint}" >> ${envFile}
+            echo "user=${config.config['iac-pulumi:username']}" >> ${envFile}
+            echo "password=${config.config['iac-pulumi:password']}" >> ${envFile}
+            echo "port=${config.config['iac-pulumi:db_port']}" >> ${envFile}
+            echo "dialect=${config.config['iac-pulumi:db_dialect']}" >> ${envFile}
+            echo "database=${config.config['iac-pulumi:db_name']}" >> ${envFile}`
+
+
+
     });
 });
 });
