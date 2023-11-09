@@ -25,12 +25,11 @@ const available = aws.getAvailabilityZones({
 });
 
 available.then(available => {
-    
-    const zoneCount = Math.min((available.names?.length || 0),parseInt(config.config['iac-pulumi:no_of_max_subnets']));
+    const zoneCount = Math.min((available.names?.length || 0), parseInt(config.config['iac-pulumi:no_of_max_subnets']));
     const arr = config.config['iac-pulumi:sub_cidr'].split(".");
     for (let i = 0; i < zoneCount; i++) {
         // Create public subnets
-        
+
         const subpubName = config.config['iac-pulumi:public_subnet_name'] + i;
         console.log(subpubName)
         const subpubCidr = arr[0] + "." + arr[1] + "." + i + "." + arr[3];
@@ -115,171 +114,210 @@ available.then(available => {
 
     // Create an EC2 security group for web applications
     const appSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:security_group_name'], {
-    vpcId: myvpc.id,
-    description: "Security group for web applications",
-    ingress: [
-      {
-        fromPort: config.config['iac-pulumi:ssh_from_port'], //SSH
-        toPort: config.config['iac-pulumi:ssh_to_port'],
-        protocol: config.config['iac-pulumi:protocol'],
-        cidrBlocks: [config.config['iac-pulumi:ssh_ip']], 
-      },
-      {
-        fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
-        toPort: config.config['iac-pulumi:http_to_port'],
-        protocol: config.config['iac-pulumi:protocol'],
-        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
-      },
-      {
-        fromPort: config.config['iac-pulumi:https_from_port'], //HTTPS
-        toPort: config.config['iac-pulumi:https_to_port'],
-        protocol: config.config['iac-pulumi:protocol'],
-        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
-      },
-      {
-        fromPort: config.config['iac-pulumi:your_from_port'], //your port
-        toPort: config.config['iac-pulumi:your_to_port'],
-        protocol: config.config['iac-pulumi:protocol'],
-        cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-        ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']], 
-      },
-    ],
-    egress: [
-        {
-            protocol: config.config['iac-pulumi:int_protocol'], 
-            fromPort: config.config['iac-pulumi:int_fromPort'],
-            toPort: config.config['iac-pulumi:int_toPort'],
-            cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],   
-        },
-    ],
-    tags: {
-        Name: config.config['iac-pulumi:security_group_name'],
-    },
-  });
-
-  const ami = aws.ec2.getAmi({
-    filters: [
-        {
-            name: config.config['iac-pulumi:ami_name'],
-            values: [config.config['iac-pulumi:ami_name_value']],
-        },
-        {
-            name: config.config['iac-pulumi:root_device_type_tag'],
-            values: [config.config['iac-pulumi:root_device_type_tag_value']],
-        },
-        {
-            name: config.config['iac-pulumi:virtualization_tag'],
-            values: [config.config['iac-pulumi:virtualization_tag_value']],
-        },
-    ],
-    mostRecent: true,
-    owners: [config.config['iac-pulumi:owner']],
-});
-
-// const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
-//     ami: ami.then(i => i.id),
-//     instanceType: config.config['iac-pulumi:instance_type'],
-//     subnetId: iam_publicSubnets[0],
-//     keyName: config.config['iac-pulumi:key_value'],
-//     associatePublicIpAddress: true,
-//     vpcSecurityGroupIds: [
-//         appSecurityGroup.id,
-//     ]
-
-// });
-  //rds parameter group
-
-  const rdsParameterGroup = new aws.rds.ParameterGroup("rds-parameter-group", {
-    vpcId: myvpc.id,
-    description: "Custom parameter group for csye6225",
-family: "mysql8.0",
-parameters: [
-    {
-        name: "character_set_server",
-        value: "utf8"
-    },
-]
- 
-});
-
-const privateGroup = iam_privateSubnets.map(subnet => subnet.id)
-//RDS Subnet Group
-const rdsSubnetGroup = new aws.rds.SubnetGroup(config.config['iac-pulumi:rds_subnet_group_name'], {
-    subnetIds: privateGroup,
-    description: "Subnet group for RDS instance",
-    tags: {
-        Name: config.config['iac-pulumi:rds_subnet_group_name'],
-    },
-});
-
-//RDS Security Group
-const rdsSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:db_security_group_name'],{
-    vpcId: myvpc.id,
-    description: "RDS database security group",
-    ingress: [
-        {   
-            fromPort: config.config['iac-pulumi:db_to_port'], //your port
-            toPort: config.config['iac-pulumi:db_to_port'],
-            protocol: config.config['iac-pulumi:protocol'],
-            // protocol: "tcp", // Use TCP for database
-            // fromPort: config.config("iac-pulumi:db_from_port"),
-            // toPort: config.config("iac-pulumi:db_to_port"),
-
-            securityGroups: [appSecurityGroup.id], // Reference to the application security group
-        },
-    ],
-    egress: [
-        {
-            protocol: config.config['iac-pulumi:int_protocol'], 
-            fromPort: config.config['iac-pulumi:int_fromPort'],
-            toPort: config.config['iac-pulumi:int_toPort'],
-            cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],   
-        },
-    ],
-    
-});
-
-
-const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_name"], {
-    allocatedStorage: config.config['iac-pulumi:db_allocated_storage'],
-    storageType: config.config['iac-pulumi:db_storage_type'],
-    engine: config.config['iac-pulumi:db_engine'],
-    engineVersion: config.config['iac-pulumi:db_engine_version'],
-    skipFinalSnapshot: config.config['iac-pulumi:db_skip_final_snapshot'],
-    instanceClass: config.config['iac-pulumi:db_instance_class'],
-    multiAz: config.config['iac-pulumi:multi_az'],
-    dbName: config.config['iac-pulumi:db_name'],
-    username: config.config['iac-pulumi:username'],
-    password: config.config['iac-pulumi:password'],
-    parameterGroupName: config.config ['db_parameter_group_name'],
-    dbSubnetGroupName: rdsSubnetGroup.name,
-    vpcSecurityGroupIds: [rdsSecurityGroup.id],
-    publiclyAccessible: config.config['iac-pulumi:publiclyAccessible'],
-})
-
-rdsInstance.endpoint.apply(endpoint => {
-    const envFile = config.config['iac-pulumi:db_env_path']
-    const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
-        ami: ami.then(i => i.id),
-        instanceType: config.config['iac-pulumi:instance_type'],
-        subnetId: iam_publicSubnets[0],
-        keyName: config.config['iac-pulumi:key_value'],
-        associatePublicIpAddress: true,
-        vpcSecurityGroupIds: [
-            appSecurityGroup.id,
+        vpcId: myvpc.id,
+        description: "Security group for web applications",
+        ingress: [
+            {
+                fromPort: config.config['iac-pulumi:ssh_from_port'], //SSH
+                toPort: config.config['iac-pulumi:ssh_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                cidrBlocks: [config.config['iac-pulumi:ssh_ip']],
+            },
+            {
+                fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
+                toPort: config.config['iac-pulumi:http_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
+            },
+            {
+                fromPort: config.config['iac-pulumi:https_from_port'], //HTTPS
+                toPort: config.config['iac-pulumi:https_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
+            },
+            {
+                fromPort: config.config['iac-pulumi:your_from_port'], //your port
+                toPort: config.config['iac-pulumi:your_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
+            },
         ],
-        userData: pulumi.interpolate`#!/bin/bash
+        egress: [
+            {
+                protocol: config.config['iac-pulumi:int_protocol'],
+                fromPort: config.config['iac-pulumi:int_fromPort'],
+                toPort: config.config['iac-pulumi:int_toPort'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+            },
+        ],
+        tags: {
+            Name: config.config['iac-pulumi:security_group_name'],
+        },
+    });
+
+    const ami = aws.ec2.getAmi({
+        filters: [
+            {
+                name: config.config['iac-pulumi:ami_name'],
+                values: [config.config['iac-pulumi:ami_name_value']],
+            },
+            {
+                name: config.config['iac-pulumi:root_device_type_tag'],
+                values: [config.config['iac-pulumi:root_device_type_tag_value']],
+            },
+            {
+                name: config.config['iac-pulumi:virtualization_tag'],
+                values: [config.config['iac-pulumi:virtualization_tag_value']],
+            },
+        ],
+        mostRecent: true,
+        owners: [config.config['iac-pulumi:owner']],
+    });
+
+    // const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+    //     ami: ami.then(i => i.id),
+    //     instanceType: config.config['iac-pulumi:instance_type'],
+    //     subnetId: iam_publicSubnets[0],
+    //     keyName: config.config['iac-pulumi:key_value'],
+    //     associatePublicIpAddress: true,
+    //     vpcSecurityGroupIds: [
+    //         appSecurityGroup.id,
+    //     ]
+
+    // });
+    //rds parameter group
+
+    const rdsParameterGroup = new aws.rds.ParameterGroup("rds-parameter-group", {
+        vpcId: myvpc.id,
+        description: "Custom parameter group for csye6225",
+        family: "mysql8.0",
+        parameters: [
+            {
+                name: "character_set_server",
+                value: "utf8"
+            },
+        ]
+
+    });
+
+    const privateGroup = iam_privateSubnets.map(subnet => subnet.id)
+    //RDS Subnet Group
+    const rdsSubnetGroup = new aws.rds.SubnetGroup(config.config['iac-pulumi:rds_subnet_group_name'], {
+        subnetIds: privateGroup,
+        description: "Subnet group for RDS instance",
+        tags: {
+            Name: config.config['iac-pulumi:rds_subnet_group_name'],
+        },
+    });
+
+    //RDS Security Group
+    const rdsSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:db_security_group_name'], {
+        vpcId: myvpc.id,
+        description: "RDS database security group",
+        ingress: [
+            {
+                fromPort: config.config['iac-pulumi:db_to_port'], //your port
+                toPort: config.config['iac-pulumi:db_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                // protocol: "tcp", // Use TCP for database
+                // fromPort: config.config("iac-pulumi:db_from_port"),
+                // toPort: config.config("iac-pulumi:db_to_port"),
+
+                securityGroups: [appSecurityGroup.id], // Reference to the application security group
+            },
+        ],
+        egress: [
+            {
+                protocol: config.config['iac-pulumi:int_protocol'],
+                fromPort: config.config['iac-pulumi:int_fromPort'],
+                toPort: config.config['iac-pulumi:int_toPort'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+            },
+        ],
+
+    });
+
+
+    const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_name"], {
+        allocatedStorage: config.config['iac-pulumi:db_allocated_storage'],
+        storageType: config.config['iac-pulumi:db_storage_type'],
+        engine: config.config['iac-pulumi:db_engine'],
+        engineVersion: config.config['iac-pulumi:db_engine_version'],
+        skipFinalSnapshot: config.config['iac-pulumi:db_skip_final_snapshot'],
+        instanceClass: config.config['iac-pulumi:db_instance_class'],
+        multiAz: config.config['iac-pulumi:multi_az'],
+        dbName: config.config['iac-pulumi:db_name'],
+        username: config.config['iac-pulumi:username'],
+        password: config.config['iac-pulumi:password'],
+        parameterGroupName: config.config['db_parameter_group_name'],
+        dbSubnetGroupName: rdsSubnetGroup.name,
+        vpcSecurityGroupIds: [rdsSecurityGroup.id],
+        publiclyAccessible: config.config['iac-pulumi:publiclyAccessible'],
+    })
+
+    rdsInstance.endpoint.apply(endpoint => {
+        const IAMRole = new aws.iam.Role(config.config['iac-pulumi:iamrole'], {
+            assumeRolePolicy: JSON.stringify({
+                Version: "2012-10-17",
+                Statement: [
+                    {
+                        Action: "sts:AssumeRole",
+                        Effect: "Allow",
+                        Principal: {
+                            Service: "ec2.amazonaws.com",
+                        },
+                    },
+                ],
+            })
+        })
+
+        const policy = new aws.iam.PolicyAttachment("cloudwatch-agent-policy", {
+            policyArn: config.config['iac-pulumi:policyarn'],
+            roles: [IAMRole.name],
+        });
+
+        const roleAttachment = new aws.iam.InstanceProfile("my-instance-profile", {
+            role: IAMRole.name,
+        });
+        const envFile = config.config['iac-pulumi:db_env_path']
+        const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+            ami: ami.then(i => i.id),
+            instanceType: config.config['iac-pulumi:instance_type'],
+            subnetId: iam_publicSubnets[0],
+            iamInstanceProfile: roleAttachment.name,
+            keyName: config.config['iac-pulumi:key_value'],
+            associatePublicIpAddress: true,
+            vpcSecurityGroupIds: [
+                appSecurityGroup.id,
+            ],
+            userData: pulumi.interpolate`#!/bin/bash
             echo "host=${endpoint}" >> ${envFile}
             echo "user=${config.config['iac-pulumi:username']}" >> ${envFile}
             echo "password=${config.config['iac-pulumi:password']}" >> ${envFile}
             echo "port=${config.config['iac-pulumi:db_port']}" >> ${envFile}
             echo "dialect=${config.config['iac-pulumi:db_dialect']}" >> ${envFile}
-            echo "database=${config.config['iac-pulumi:db_name']}" >> ${envFile}`
-
-
-
+            echo "database=${config.config['iac-pulumi:db_name']}" >> ${envFile}
+            echo "statsdPort=${config.config['iac-pulumi:statsdPort']}" >> ${envFile}
+            echo "statsdhost=${config.config['iac-pulumi:statsdhost']}" >> ${envFile}
+            sudo chown -R csye6225 /opt/csye6225
+            sudo chgrp -R csye6225 /opt/csye6225
+            sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloudwatch-config.json -s
+            sudo systemctl restart app.service
+            sudo systemctl restart amazon-cloudwatch-agent
+            `,
+        });
+        const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
+        const route53Record = new aws.route53.Record("myRoute53Record",
+            {
+                name: config.config['iac-pulumi:dnsname'] ,
+                zoneId: hostedZone.then(zone => zone.zoneId),
+                type: config.config['iac-pulumi:type'],
+                records: [instance.publicIp],
+                ttl: config.config['iac-pulumi:ttl'] ,
+            });
     });
 });
-});
+
