@@ -259,7 +259,7 @@ available.then(available => {
     })
 
     rdsInstance.endpoint.apply(endpoint => {
-        const IAMRole = new aws.iam.Role("IAM", {
+        const IAMRole = new aws.iam.Role(config.config['iac-pulumi:iamrole'], {
             assumeRolePolicy: JSON.stringify({
                 Version: "2012-10-17",
                 Statement: [
@@ -275,7 +275,7 @@ available.then(available => {
         })
 
         const policy = new aws.iam.PolicyAttachment("cloudwatch-agent-policy", {
-            policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+            policyArn: config.config['iac-pulumi:policyarn'],
             roles: [IAMRole.name],
         });
 
@@ -309,14 +309,14 @@ available.then(available => {
             sudo systemctl restart amazon-cloudwatch-agent
             `,
         });
-        const hostedZone = aws.route53.getZone({ name: "demo.mihirsheth.me" });
+        const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
         const route53Record = new aws.route53.Record("myRoute53Record",
             {
-                name: "demo.mihirsheth.me",
+                name: config.config['iac-pulumi:dnsname'] ,
                 zoneId: hostedZone.then(zone => zone.zoneId),
-                type: "A",
+                type: config.config['iac-pulumi:type'],
                 records: [instance.publicIp],
-                ttl: 60,
+                ttl: config.config['iac-pulumi:ttl'] ,
             });
     });
 });
