@@ -112,7 +112,7 @@ available.then(available => {
         },
     });
 
-    const load_bal_security = new aws.ec2.SecurityGroup("cloud-load-balancer",{
+    const load_bal_security = new aws.ec2.SecurityGroup("cloud-load-balancer", {
         vpcId: myvpc.id,
         ingress: [
             {
@@ -129,19 +129,19 @@ available.then(available => {
                 cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
                 ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
             },
-    ],
-    egress: [
-        {
-            protocol: config.config['iac-pulumi:int_protocol'],
-            fromPort: config.config['iac-pulumi:int_fromPort'],
-            toPort: config.config['iac-pulumi:int_toPort'],
-            cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-        },
+        ],
+        egress: [
+            {
+                protocol: config.config['iac-pulumi:int_protocol'],
+                fromPort: config.config['iac-pulumi:int_fromPort'],
+                toPort: config.config['iac-pulumi:int_toPort'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+            },
         ],
         tags: {
             Name: "cloud-load-balancer",
         },
-        
+
     });
 
     // Create an EC2 security group for web applications
@@ -305,26 +305,27 @@ available.then(available => {
         // });
 
         // launch template
-        
-        const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template",{
+
+        const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
 
             imageId: ami.then((i) => i.id), // Your custom AMI
             instanceType: "t2.micro",
             keyName: config.config["iac-pulumi:key_value"],
             networkInterfaces: [
-              {
-                associatePublicIpAddress: true,
-                securityGroups: [appSecurityGroup.id],
-              },
+                {
+                    associatePublicIpAddress: true,
+                    securityGroups: [appSecurityGroup.id],
+                },
             ],
             blockDeviceMappings: [{
                 deviceName: config.config['iac-pulumi:devicename'],
-            ebs: {
-                volumeSize: config.config['iac-pulumi:devicesize'],
-                volumeType: config.config['iac-pulumi:volumetype'],
-                deleteOnTermination: config.config['iac-pulumi:deleteOnTermination']
-            }
+                ebs: {
+                    volumeSize: config.config['iac-pulumi:devicesize'],
+                    volumeType: config.config['iac-pulumi:volumetype'],
+                    deleteOnTermination: config.config['iac-pulumi:deleteOnTermination']
+                }
             }],
+            iamInstanceProfile: {name: roleAttachment.name},
             userData: Buffer.from(`#!/bin/bash
             echo "host=${endpoint}" >> ${envFile}
             echo "user=${config.config['iac-pulumi:username']}" >> ${envFile}
@@ -341,108 +342,108 @@ available.then(available => {
         }
         );
 
-        const targetGroup = new aws.lb.TargetGroup("targetGroup",{
-        port: config.config['iac-pulumi:db_port'],
-        protocol: config.config['iac-pulumi:lbprotocol'],
-        targetType: config.config['iac-pulumi:targetIns'],
-        vpcId: myvpc.id,
-        healthCheck: {
-            path: "/healthz", 
-            interval: config.config['iac-pulumi:healthzInt'], 
-            timeout: config.config['iac-pulumi:healthzTime'], 
-            healthyThreshold: config.config['iac-pulumi:healthzThreshold'], 
-            unhealthyThreshold: config.config['iac-pulumi:unhealthzThreshold'], 
-            matcher: config.config['iac-pulumi:healthzMatcher'],
-        },
-    });
-       const ec2_asg = new aws.autoscaling.Group("bar", {
-        vpcZoneIdentifiers: iam_publicSubnets,
-        desiredCapacity: config.config['iac-pulumi:desCap'],
-        minSize: config.config['iac-pulumi:autoMinSize'],
-        maxSize: config.config['iac-pulumi:autoMaxSize'],
-        targetGroupArns: [targetGroup.arn],
-        launchTemplate: {
-            id: ec2_launch_Template.id,
-        },
-        tags: [
-            {
-                key: "Name",
-                value: "AutoScaling Group",
-                propagateAtLaunch: true,
+        const targetGroup = new aws.lb.TargetGroup("targetGroup", {
+            port: config.config['iac-pulumi:db_port'],
+            protocol: config.config['iac-pulumi:lbprotocol'],
+            targetType: config.config['iac-pulumi:targetIns'],
+            vpcId: myvpc.id,
+            healthCheck: {
+                path: "/healthz",
+                interval: config.config['iac-pulumi:healthzInt'],
+                timeout: config.config['iac-pulumi:healthzTime'],
+                healthyThreshold: config.config['iac-pulumi:healthzThreshold'],
+                unhealthyThreshold: config.config['iac-pulumi:unhealthzThreshold'],
+                matcher: config.config['iac-pulumi:healthzMatcher'],
             },
-        ]
-    });
+        });
+        const ec2_asg = new aws.autoscaling.Group("bar", {
+            vpcZoneIdentifiers: iam_publicSubnets,
+            desiredCapacity: config.config['iac-pulumi:desCap'],
+            minSize: config.config['iac-pulumi:autoMinSize'],
+            maxSize: config.config['iac-pulumi:autoMaxSize'],
+            targetGroupArns: [targetGroup.arn],
+            launchTemplate: {
+                id: ec2_launch_Template.id,
+            },
+            tags: [
+                {
+                    key: "Name",
+                    value: "AutoScaling Group",
+                    propagateAtLaunch: true,
+                },
+            ]
+        });
 
-    const scaleUpPolicy = new aws.autoscaling.Policy("asgScaleUpPolicy", {
-        adjustmentType: config.config['iac-pulumi:autoType'],
-        scalingAdjustment: config.config['iac-pulumi:autoAdj'],
-        cooldown: config.config['iac-pulumi:autoCd'],
-        policyType: config.config['iac-pulumi:autoPolicy'],
-        autoscalingGroupName: ec2_asg.name,
-    });
+        const scaleUpPolicy = new aws.autoscaling.Policy("asgScaleUpPolicy", {
+            adjustmentType: config.config['iac-pulumi:autoType'],
+            scalingAdjustment: config.config['iac-pulumi:autoAdj'],
+            cooldown: config.config['iac-pulumi:autoCd'],
+            policyType: config.config['iac-pulumi:autoPolicy'],
+            autoscalingGroupName: ec2_asg.name,
+        });
 
-    const scaleUpCondition = new aws.cloudwatch.MetricAlarm("scaleUpCondition", {
-        metricName: config.config['iac-pulumi:scaleMetric'],
-        namespace: config.config['iac-pulumi:scaleName'],
-        statistic: config.config['iac-pulumi:scaleAvg'],
-        period: config.config['iac-pulumi:scalePeriod'],
-        evaluationPeriods: config.config['iac-pulumi:evalPeriod'],
-        comparisonOperator: config.config['iac-pulumi:scaleComp'],
-        threshold: config.config['iac-pulumi:scaleThreshold'],
-        dimensions: {
-            AutoScalingGroupName: ec2_asg.name,
-        },
-        alarmActions: [scaleUpPolicy.arn],
-    });
+        const scaleUpCondition = new aws.cloudwatch.MetricAlarm("scaleUpCondition", {
+            metricName: config.config['iac-pulumi:scaleMetric'],
+            namespace: config.config['iac-pulumi:scaleName'],
+            statistic: config.config['iac-pulumi:scaleAvg'],
+            period: config.config['iac-pulumi:scalePeriod'],
+            evaluationPeriods: config.config['iac-pulumi:evalPeriod'],
+            comparisonOperator: config.config['iac-pulumi:scaleComp'],
+            threshold: config.config['iac-pulumi:scaleThreshold'],
+            dimensions: {
+                AutoScalingGroupName: ec2_asg.name,
+            },
+            alarmActions: [scaleUpPolicy.arn],
+        });
 
-    const scaleDownPolicy = new aws.autoscaling.Policy("asgScaleDownPolicy", {
-        adjustmentType: config.config['iac-pulumi:adjustType'],
-        scalingAdjustment: config.config['iac-pulumi:scaleadjust'],
-        cooldown: config.config['iac-pulumi:cooldown'],
-        policyType: config.config['iac-pulumi:ptype'],
-        autoscalingGroupName: ec2_asg.name,
-    });
+        const scaleDownPolicy = new aws.autoscaling.Policy("asgScaleDownPolicy", {
+            adjustmentType: config.config['iac-pulumi:adjustType'],
+            scalingAdjustment: config.config['iac-pulumi:scaleadjust'],
+            cooldown: config.config['iac-pulumi:cooldown'],
+            policyType: config.config['iac-pulumi:ptype'],
+            autoscalingGroupName: ec2_asg.name,
+        });
 
-    const scaleDownCondition = new aws.cloudwatch.MetricAlarm("scaleDownCondition", {
-        metricName: config.config['iac-pulumi:metricName'],
-        namespace: config.config['iac-pulumi:namespace'],
-        statistic: config.config['iac-pulumi:statistic'],
-        period: config.config['iac-pulumi:period'],
-        evaluationPeriods: config.config['iac-pulumi:evaluation'],
-        comparisonOperator: config.config['iac-pulumi:comparison'],
-        threshold: config.config['iac-pulumi:threshold'],
-        dimensions: {
-            AutoScalingGroupName: ec2_asg.name,
-        },
-        alarmActions: [scaleDownPolicy.arn],
-    });
-    
-    const alb = new aws.lb.LoadBalancer("cloud-loadBalancer", {
-        loadBalancerType: config.config['iac-pulumi:lbTtypeapp'],
-        securityGroups: [load_bal_security.id],
-        subnets: iam_publicSubnets,
-    });
-    const listener = new aws.lb.Listener("listener", {
-        loadBalancerArn: alb.arn,
-        port: config.config['iac-pulumi:http_from_port'],
-        protocol: config.config['iac-pulumi:lbprotocol'],
-        defaultActions: [{
-            type: config.config['iac-pulumi:lbTtype'],
-            targetGroupArn: targetGroup.arn,
-        }],
-    });
+        const scaleDownCondition = new aws.cloudwatch.MetricAlarm("scaleDownCondition", {
+            metricName: config.config['iac-pulumi:metricName'],
+            namespace: config.config['iac-pulumi:namespace'],
+            statistic: config.config['iac-pulumi:statistic'],
+            period: config.config['iac-pulumi:period'],
+            evaluationPeriods: config.config['iac-pulumi:evaluation'],
+            comparisonOperator: config.config['iac-pulumi:comparison'],
+            threshold: config.config['iac-pulumi:threshold'],
+            dimensions: {
+                AutoScalingGroupName: ec2_asg.name,
+            },
+            alarmActions: [scaleDownPolicy.arn],
+        });
+
+        const alb = new aws.lb.LoadBalancer("cloud-loadBalancer", {
+            loadBalancerType: config.config['iac-pulumi:lbTtypeapp'],
+            securityGroups: [load_bal_security.id],
+            subnets: iam_publicSubnets,
+        });
+        const listener = new aws.lb.Listener("listener", {
+            loadBalancerArn: alb.arn,
+            port: config.config['iac-pulumi:http_from_port'],
+            protocol: config.config['iac-pulumi:lbprotocol'],
+            defaultActions: [{
+                type: config.config['iac-pulumi:lbTtype'],
+                targetGroupArn: targetGroup.arn,
+            }],
+        });
 
         const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
         const route53Record = new aws.route53.Record("myRoute53Record",
             {
-                name: config.config['iac-pulumi:dnsname'] ,
+                name: config.config['iac-pulumi:dnsname'],
                 zoneId: hostedZone.then(zone => zone.zoneId),
                 type: config.config['iac-pulumi:type'],
                 aliases: [
                     {
-                    name: alb.dnsName,
-                    zoneId: alb.zoneId,
-                    evaluateTargetHealth: config.config['iacpulumi:associatePublicIpAddress'],
+                        name: alb.dnsName,
+                        zoneId: alb.zoneId,
+                        evaluateTargetHealth: config.config['iacpulumi:associatePublicIpAddress'],
                     }
                 ]
             });
