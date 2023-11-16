@@ -15,7 +15,7 @@ const myvpc = new aws.ec2.Vpc(config.config['iac-pulumi:vpc_name'], {
     },
 });
 
-// Creating subnet 
+
 
 // Create public subnets
 const iam_publicSubnets = [];
@@ -112,17 +112,9 @@ available.then(available => {
         },
     });
 
-    // Create an EC2 security group for web applications
-    const appSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:security_group_name'], {
+    const load_bal_security = new aws.ec2.SecurityGroup("cloud-load-balancer", {
         vpcId: myvpc.id,
-        description: "Security group for web applications",
         ingress: [
-            {
-                fromPort: config.config['iac-pulumi:ssh_from_port'], //SSH
-                toPort: config.config['iac-pulumi:ssh_to_port'],
-                protocol: config.config['iac-pulumi:protocol'],
-                cidrBlocks: [config.config['iac-pulumi:ssh_ip']],
-            },
             {
                 fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
                 toPort: config.config['iac-pulumi:http_to_port'],
@@ -137,12 +129,51 @@ available.then(available => {
                 cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
                 ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
             },
+        ],
+        egress: [
+            {
+                protocol: config.config['iac-pulumi:int_protocol'],
+                fromPort: config.config['iac-pulumi:int_fromPort'],
+                toPort: config.config['iac-pulumi:int_toPort'],
+                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+            },
+        ],
+        tags: {
+            Name: "cloud-load-balancer",
+        },
+
+    });
+
+    // Create an EC2 security group for web applications
+    const appSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:security_group_name'], {
+        vpcId: myvpc.id,
+        description: "Security group for web applications",
+        ingress: [
+            {
+                fromPort: config.config['iac-pulumi:ssh_from_port'], //SSH
+                toPort: config.config['iac-pulumi:ssh_to_port'],
+                protocol: config.config['iac-pulumi:protocol'],
+                cidrBlocks: [config.config['iac-pulumi:ssh_ip']],
+                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']]
+            },
+            // {
+            //     fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
+            //     toPort: config.config['iac-pulumi:http_to_port'],
+            //     protocol: config.config['iac-pulumi:protocol'],
+            //     security_groups: [load_bal_security.id],
+            // },
+            // {
+            //     fromPort: config.config['iac-pulumi:https_from_port'], //HTTPS
+            //     toPort: config.config['iac-pulumi:https_to_port'],
+            //     protocol: config.config['iac-pulumi:protocol'],
+            //     cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
+            //     ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
+            // },
             {
                 fromPort: config.config['iac-pulumi:your_from_port'], //your port
                 toPort: config.config['iac-pulumi:your_to_port'],
                 protocol: config.config['iac-pulumi:protocol'],
-                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
+                security_groups: [load_bal_security.id],
             },
         ],
         egress: [
@@ -158,60 +189,6 @@ available.then(available => {
         },
     });
 
-    const ami = aws.ec2.getAmi({
-        filters: [
-            {
-                name: config.config['iac-pulumi:ami_name'],
-                values: [config.config['iac-pulumi:ami_name_value']],
-            },
-            {
-                name: config.config['iac-pulumi:root_device_type_tag'],
-                values: [config.config['iac-pulumi:root_device_type_tag_value']],
-            },
-            {
-                name: config.config['iac-pulumi:virtualization_tag'],
-                values: [config.config['iac-pulumi:virtualization_tag_value']],
-            },
-        ],
-        mostRecent: true,
-        owners: [config.config['iac-pulumi:owner']],
-    });
-
-    // const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
-    //     ami: ami.then(i => i.id),
-    //     instanceType: config.config['iac-pulumi:instance_type'],
-    //     subnetId: iam_publicSubnets[0],
-    //     keyName: config.config['iac-pulumi:key_value'],
-    //     associatePublicIpAddress: true,
-    //     vpcSecurityGroupIds: [
-    //         appSecurityGroup.id,
-    //     ]
-
-    // });
-    //rds parameter group
-
-    const rdsParameterGroup = new aws.rds.ParameterGroup("rds-parameter-group", {
-        vpcId: myvpc.id,
-        description: "Custom parameter group for csye6225",
-        family: "mysql8.0",
-        parameters: [
-            {
-                name: "character_set_server",
-                value: "utf8"
-            },
-        ]
-
-    });
-
-    const privateGroup = iam_privateSubnets.map(subnet => subnet.id)
-    //RDS Subnet Group
-    const rdsSubnetGroup = new aws.rds.SubnetGroup(config.config['iac-pulumi:rds_subnet_group_name'], {
-        subnetIds: privateGroup,
-        description: "Subnet group for RDS instance",
-        tags: {
-            Name: config.config['iac-pulumi:rds_subnet_group_name'],
-        },
-    });
 
     //RDS Security Group
     const rdsSecurityGroup = new aws.ec2.SecurityGroup(config.config['iac-pulumi:db_security_group_name'], {
@@ -237,9 +214,31 @@ available.then(available => {
                 cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
             },
         ],
+        tags: {
+            Name: config.config['iac-pulumi:db_security_group_name']
+        }
+    });
+    const rdsParameterGroup = new aws.rds.ParameterGroup("rds-parameter-group", {
+        vpcId: myvpc.id,
+        description: "Custom parameter group for csye6225",
+        family: "mysql8.0",
+        parameters: [
+            {
+                name: "character_set_server",
+                value: "utf8"
+            },
+        ]
 
     });
-
+    const privateGroup = iam_privateSubnets.map(subnet => subnet.id)
+    //RDS Subnet Group
+    const rdsSubnetGroup = new aws.rds.SubnetGroup(config.config['iac-pulumi:rds_subnet_group_name'], {
+        subnetIds: privateGroup,
+        description: "Subnet group for RDS instance",
+        tags: {
+            Name: config.config['iac-pulumi:rds_subnet_group_name'],
+        },
+    });
 
     const rdsInstance = new aws.rds.Instance(config.config["iac-pulumi:db_instance_name"], {
         allocatedStorage: config.config['iac-pulumi:db_allocated_storage'],
@@ -258,6 +257,25 @@ available.then(available => {
         publiclyAccessible: config.config['iac-pulumi:publiclyAccessible'],
     })
 
+
+    const ami = aws.ec2.getAmi({
+        filters: [
+            {
+                name: config.config['iac-pulumi:ami_name'],
+                values: [config.config['iac-pulumi:ami_name_value']],
+            },
+            {
+                name: config.config['iac-pulumi:root_device_type_tag'],
+                values: [config.config['iac-pulumi:root_device_type_tag_value']],
+            },
+            {
+                name: config.config['iac-pulumi:virtualization_tag'],
+                values: [config.config['iac-pulumi:virtualization_tag_value']],
+            },
+        ],
+        mostRecent: true,
+        owners: [config.config['iac-pulumi:owner']],
+    });
     rdsInstance.endpoint.apply(endpoint => {
         const IAMRole = new aws.iam.Role(config.config['iac-pulumi:iamrole'], {
             assumeRolePolicy: JSON.stringify({
@@ -283,17 +301,32 @@ available.then(available => {
             role: IAMRole.name,
         });
         const envFile = config.config['iac-pulumi:db_env_path']
-        const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
-            ami: ami.then(i => i.id),
-            instanceType: config.config['iac-pulumi:instance_type'],
-            subnetId: iam_publicSubnets[0],
-            iamInstanceProfile: roleAttachment.name,
-            keyName: config.config['iac-pulumi:key_value'],
-            associatePublicIpAddress: true,
-            vpcSecurityGroupIds: [
-                appSecurityGroup.id,
+        // const instance = new aws.ec2.Instance(config.config['iac-pulumi:instance_tag'], {
+        // });
+
+        // launch template
+
+        const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
+
+            imageId: ami.then((i) => i.id), // Your custom AMI
+            instanceType: "t2.micro",
+            keyName: config.config["iac-pulumi:key_value"],
+            networkInterfaces: [
+                {
+                    associatePublicIpAddress: true,
+                    securityGroups: [appSecurityGroup.id],
+                },
             ],
-            userData: pulumi.interpolate`#!/bin/bash
+            blockDeviceMappings: [{
+                deviceName: config.config['iac-pulumi:devicename'],
+                ebs: {
+                    volumeSize: config.config['iac-pulumi:devicesize'],
+                    volumeType: config.config['iac-pulumi:volumetype'],
+                    deleteOnTermination: config.config['iac-pulumi:deleteOnTermination']
+                }
+            }],
+            iamInstanceProfile: {name: roleAttachment.name},
+            userData: Buffer.from(`#!/bin/bash
             echo "host=${endpoint}" >> ${envFile}
             echo "user=${config.config['iac-pulumi:username']}" >> ${envFile}
             echo "password=${config.config['iac-pulumi:password']}" >> ${envFile}
@@ -302,21 +335,117 @@ available.then(available => {
             echo "database=${config.config['iac-pulumi:db_name']}" >> ${envFile}
             echo "statsdPort=${config.config['iac-pulumi:statsdPort']}" >> ${envFile}
             echo "statsdhost=${config.config['iac-pulumi:statsdhost']}" >> ${envFile}
-            sudo chown -R csye6225 /opt/csye6225
-            sudo chgrp -R csye6225 /opt/csye6225
-            sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloudwatch-config.json -s
             sudo systemctl restart app.service
             sudo systemctl restart amazon-cloudwatch-agent
-            `,
+            `,).toString('base64')
+
+        }
+        );
+
+        const targetGroup = new aws.lb.TargetGroup("targetGroup", {
+            port: config.config['iac-pulumi:db_port'],
+            protocol: config.config['iac-pulumi:lbprotocol'],
+            targetType: config.config['iac-pulumi:targetIns'],
+            vpcId: myvpc.id,
+            healthCheck: {
+                path: "/healthz",
+                interval: config.config['iac-pulumi:healthzInt'],
+                timeout: config.config['iac-pulumi:healthzTime'],
+                healthyThreshold: config.config['iac-pulumi:healthzThreshold'],
+                unhealthyThreshold: config.config['iac-pulumi:unhealthzThreshold'],
+                matcher: config.config['iac-pulumi:healthzMatcher'],
+            },
         });
+        const ec2_asg = new aws.autoscaling.Group("bar", {
+            vpcZoneIdentifiers: iam_publicSubnets,
+            desiredCapacity: config.config['iac-pulumi:desCap'],
+            minSize: config.config['iac-pulumi:autoMinSize'],
+            maxSize: config.config['iac-pulumi:autoMaxSize'],
+            targetGroupArns: [targetGroup.arn],
+            launchTemplate: {
+                id: ec2_launch_Template.id,
+            },
+            tags: [
+                {
+                    key: "Name",
+                    value: "AutoScaling Group",
+                    propagateAtLaunch: true,
+                },
+            ]
+        });
+
+        const scaleUpPolicy = new aws.autoscaling.Policy("asgScaleUpPolicy", {
+            adjustmentType: config.config['iac-pulumi:autoType'],
+            scalingAdjustment: config.config['iac-pulumi:autoAdj'],
+            cooldown: config.config['iac-pulumi:autoCd'],
+            policyType: config.config['iac-pulumi:autoPolicy'],
+            autoscalingGroupName: ec2_asg.name,
+        });
+
+        const scaleUpCondition = new aws.cloudwatch.MetricAlarm("scaleUpCondition", {
+            metricName: config.config['iac-pulumi:scaleMetric'],
+            namespace: config.config['iac-pulumi:scaleName'],
+            statistic: config.config['iac-pulumi:scaleAvg'],
+            period: config.config['iac-pulumi:scalePeriod'],
+            evaluationPeriods: config.config['iac-pulumi:evalPeriod'],
+            comparisonOperator: config.config['iac-pulumi:scaleComp'],
+            threshold: config.config['iac-pulumi:scaleThreshold'],
+            dimensions: {
+                AutoScalingGroupName: ec2_asg.name,
+            },
+            alarmActions: [scaleUpPolicy.arn],
+        });
+
+        const scaleDownPolicy = new aws.autoscaling.Policy("asgScaleDownPolicy", {
+            adjustmentType: config.config['iac-pulumi:adjustType'],
+            scalingAdjustment: config.config['iac-pulumi:scaleadjust'],
+            cooldown: config.config['iac-pulumi:cooldown'],
+            policyType: config.config['iac-pulumi:ptype'],
+            autoscalingGroupName: ec2_asg.name,
+        });
+
+        const scaleDownCondition = new aws.cloudwatch.MetricAlarm("scaleDownCondition", {
+            metricName: config.config['iac-pulumi:metricName'],
+            namespace: config.config['iac-pulumi:namespace'],
+            statistic: config.config['iac-pulumi:statistic'],
+            period: config.config['iac-pulumi:period'],
+            evaluationPeriods: config.config['iac-pulumi:evaluation'],
+            comparisonOperator: config.config['iac-pulumi:comparison'],
+            threshold: config.config['iac-pulumi:threshold'],
+            dimensions: {
+                AutoScalingGroupName: ec2_asg.name,
+            },
+            alarmActions: [scaleDownPolicy.arn],
+        });
+
+        const alb = new aws.lb.LoadBalancer("cloud-loadBalancer", {
+            loadBalancerType: config.config['iac-pulumi:lbTtypeapp'],
+            securityGroups: [load_bal_security.id],
+            subnets: iam_publicSubnets,
+        });
+        const listener = new aws.lb.Listener("listener", {
+            loadBalancerArn: alb.arn,
+            port: config.config['iac-pulumi:http_from_port'],
+            protocol: config.config['iac-pulumi:lbprotocol'],
+            defaultActions: [{
+                type: config.config['iac-pulumi:lbTtype'],
+                targetGroupArn: targetGroup.arn,
+            }],
+        });
+
         const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
         const route53Record = new aws.route53.Record("myRoute53Record",
             {
-                name: config.config['iac-pulumi:dnsname'] ,
+                name: config.config['iac-pulumi:dnsname'],
                 zoneId: hostedZone.then(zone => zone.zoneId),
                 type: config.config['iac-pulumi:type'],
-                records: [instance.publicIp],
-                ttl: config.config['iac-pulumi:ttl'] ,
+                aliases: [
+                    {
+                        name: alb.dnsName,
+                        zoneId: alb.zoneId,
+                        evaluateTargetHealth: config.config['iacpulumi:associatePublicIpAddress'],
+                    }
+                ]
             });
     });
 });
