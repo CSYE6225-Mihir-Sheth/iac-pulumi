@@ -2,6 +2,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as aws from "@pulumi/aws";
 import yaml from "js-yaml";
 import * as fs from "fs";
+import * as gcp from "@pulumi/gcp";
 
 const stack = pulumi.getStack();
 const configFile = fs.readFileSync(`Pulumi.${stack}.yaml`, 'utf8');
@@ -297,6 +298,8 @@ available.then(available => {
             roles: [IAMRole.name],
         });
 
+
+
         const roleAttachment = new aws.iam.InstanceProfile("my-instance-profile", {
             role: IAMRole.name,
         });
@@ -306,27 +309,281 @@ available.then(available => {
 
         // launch template
 
-        const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
+        const lambdapolicy = new aws.iam.PolicyAttachment("lambda-policy", {
+            policyArn: config.config['iac-pulumi:lambdapolicy'],
+            roles: [IAMRole.name],
+        });
 
-            imageId: ami.then((i) => i.id), // Your custom AMI
-            instanceType: "t2.micro",
-            keyName: config.config["iac-pulumi:key_value"],
-            networkInterfaces: [
+        const snsPolicy = new aws.iam.PolicyAttachment("sns-policy", {
+            policyArn: config.config['iac-pulumi:snspolicy'],
+            roles: [IAMRole.name],
+        });
+
+        const dynamodbPolicy = new aws.iam.PolicyAttachment('DBRolePolicyAttachment', {
+            policyArn: config.config['iac-pulumi:dybpolicy'],
+            roles: [IAMRole.name],
+
+        });
+
+        // Define your GCP project and zone
+        const gcpProject = config.config['iac-pulumi:projectid'];
+        const zone = config.config['iac-pulumi:reg'];
+
+        // Create a GCP service account
+        const serviceAccount = new gcp.serviceaccount.Account("gcpcli", {
+            name: config.config['iac-pulumi:servicenamee'],
+            accountId: config.config['iac-pulumi:accid'],
+            project: config.config['iac-pulumi:projectid'],
+        });
+
+
+
+        const serviceAccountKey = new gcp.serviceaccount.Key("gcpkey", {
+            serviceAccountId: serviceAccount.name,
+        });
+
+
+        const key = serviceAccountKey.privateKey.apply(key => {
+            return key;
+        });
+
+
+        // Create an SNS topic
+        const snsTopic = new aws.sns.Topic("sns-topic", {
+            name: "sns-topic",
+            displayName: "submit",
+            // tags: {
+            //  
+            // },
+        });
+
+        const ec2Role = new aws.iam.Role("EC2Role", {
+            assumeRolePolicy: JSON.stringify({
+                Version: "2012-10-17",
+                Statement: [
+                    {
+                        Action: "sts:AssumeRole",
+                        Effect: "Allow",
+                        Principal: {
+                            Service: "ec2.amazonaws.com",
+                        },
+                    },
+                ],
+            }),
+        });
+
+        // Attach policy to EC2 SNS role
+        const ec2SNSPolicy = new aws.iam.RolePolicy("EC2SNSTopicPolicy", {
+            role: ec2Role.id, // Ensure ec2Role is defined
+            policy: snsTopic.arn.apply(
+                (arn) => pulumi.interpolate`{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "sns:Publish",
+            "Resource": "${arn}"
+        }
+    ]
+}`
+            ),
+        });
+
+        const policy_sns = new aws.iam.PolicyAttachment("sns_policy_attachment",
+            {
+                policyArn: "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
+                roles: [ec2Role.name],
+            },
+        );
+
+        // GCS bucket
+        const bucket = new gcp.storage.Bucket("csye6225thebucket", {
+            name: config.config['iac-pulumi:projectn'],
+            forceDestroy: config.config['iac-pulumi:fD'],
+            location: config.config['iac-pulumi:reg'],
+            project: config.config['iac-pulumi:projectid']
+        });
+
+        const storageObjectUserRole = "roles/storage.objectUser"; // Replace with the appropriate role
+
+        const binding = new gcp.projects.IAMBinding("storage-object-binding", {
+            project: gcp.config.project,
+            members: [serviceAccount.email.apply(email => `serviceAccount:${email}`)],
+            role: storageObjectUserRole,
+        });
+
+
+
+        // Define an IAM role for the Lambda function to consume from SNS
+        const lambdaSNSRole = new aws.iam.Role("LambdaSNSRole", {
+            assumeRolePolicy: aws.iam.getPolicyDocument(
                 {
-                    associatePublicIpAddress: true,
-                    securityGroups: [appSecurityGroup.id],
-                },
-            ],
-            blockDeviceMappings: [{
-                deviceName: config.config['iac-pulumi:devicename'],
-                ebs: {
-                    volumeSize: config.config['iac-pulumi:devicesize'],
-                    volumeType: config.config['iac-pulumi:volumetype'],
-                    deleteOnTermination: config.config['iac-pulumi:deleteOnTermination']
+                    statements: [
+                        {
+                            effect: "Allow",
+                            principals: [
+                                {
+                                    type: "Service",
+                                    identifiers: ["lambda.amazonaws.com"],
+                                }
+                            ],
+                            actions: ["sts:AssumeRole"]
+                        }
+                    ]
                 }
-            }],
-            iamInstanceProfile: {name: roleAttachment.name},
-            userData: Buffer.from(`#!/bin/bash
+            ).then((assumeRole) => assumeRole.json),
+        });
+
+        const lambdaSNSPolicy = new aws.iam.RolePolicy("LambdaSNSTopicPolicy", {
+            role: lambdaSNSRole.id,
+            policy: snsTopic.arn.apply(
+              (arn) => `{
+               "Version": "2012-10-17",
+               "Statement": [
+                 {
+                   "Effect": "Allow",
+                   "Action": "sns:Subscribe",
+                   "Resource": "${arn}"
+                 },
+                 {
+                   "Effect": "Allow",
+                   "Action": [
+                     "sns:ConfirmSubscription",
+                     "sns:Receive",
+                     "sns:Publish"
+                   ],
+                   "Resource": "${arn}"
+                 }
+               ]
+             }`
+            ),
+          });
+
+
+                  // Define the DynamoDB table
+        const dynamoDBTable = new aws.dynamodb.Table("dynamodb-table", {
+            name: "dynamodbTable",
+            attributes: [
+              { name: "id", type: "S" },
+              { name: "timestamp", type: "S" },
+            ],
+            billingMode: config.config['iac-pulumi:mode'],
+            hashKey: config.config['iac-pulumi:hash'],
+            rangeKey: config.config['iac-pulumi:range'],
+            tags: {
+              Name: "dynamodb-table",
+            },
+          });
+
+        // Attach the AWSLambdaBasicExecutionRole managed policy to the Lambda role
+        const lambdaRolePolicyAttachment = new aws.iam.RolePolicyAttachment(
+            "lambdaRolePolicyAttachment",
+            {
+                role: lambdaSNSRole.name,
+                policyArn:
+                config.config['iac-pulumi:lspol'],
+            }
+        );
+
+        const lambdaFunctionTest = new aws.lambda.Function("myLambdaFunctionTest", {
+            runtime: config.config['iac-pulumi:rtime'],
+            handler: config.config['iac-pulumi:hler'],
+            role: lambdaSNSRole.arn,
+            packageType: config.config['iac-pulumi:patype'],
+            code: new pulumi.asset.AssetArchive({
+                ".": new pulumi.asset.FileArchive("/Users/mihirsheth/Desktop/11Assignment7/MihirSheth002743969_06_Assnt7/serverless"),
+            }),
+            environment: {
+                variables: {
+
+                    GOOGLE_STORAGE_BUCKET_NAME: bucket.name,
+                    SERVICE_KEY: serviceAccountKey.privateKey.apply(encoded => Buffer.from(encoded, 'base64').toString('ascii')),
+                    DNS_NAME: config.config['iac-pulumi:dsname'],
+                    MG_KEY: config.config['iac-pulumi:mgkey'],
+                    DB_TABLE_NAME: dynamoDBTable.name
+
+                },
+
+            },
+        });
+
+
+        // Add SNS trigger to Lambda function
+        const lambdaSnsPermission = new aws.lambda.Permission("lambdaSnsPermission", {
+            action: "lambda:InvokeFunction",
+            function: lambdaFunctionTest.arn,
+            principal: "sns.amazonaws.com",
+            sourceArn: snsTopic.arn,
+        });
+
+        // Subscribe Lambda to SNS
+        const snsSubscription = new aws.sns.TopicSubscription("lambda-subscription", {
+            name: "lambda-subscription",
+            topic: snsTopic,
+            protocol: config.config['iac-pulumi:pro'],
+            endpoint: lambdaFunctionTest.arn,
+            tags: {
+                Name: "lambda-subscription",
+            },
+        });
+
+        // Grant PutItem permission on the DynamoDB table to the Lambda role
+        const dynamoDBTablePolicy = new aws.iam.RolePolicy("dynamoDBTablePolicy", {
+            role: lambdaSNSRole.name,
+            policy: dynamoDBTable.arn.apply((arn) =>
+                JSON.stringify({
+                    Version: "2012-10-17",
+                    Statement: [
+                        {
+                            Effect: "Allow",
+                            Action: ["dynamodb:PutItem"],
+                            Resource: arn,
+                        },
+                    ],
+                })
+            ),
+        });
+
+        snsTopic.arn.apply((SNSarn) => {
+            const lambdaPermissions = new aws.lambda.Permission("withSns", {
+                action: "lambda:InvokeFunction",
+                function: lambdaFunctionTest.name,
+                principal: "sns.amazonaws.com",
+                sourceArn: SNSarn,
+            });
+
+            const SNSTopicSubscription = new aws.sns.TopicSubscription("lambda", {
+                topic: SNSarn,
+                protocol: "lambda",
+                endpoint: lambdaFunctionTest.arn,
+            });
+
+
+            const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
+
+                imageId: ami.then((i) => i.id), // Your custom AMI
+                instanceType: "t2.micro",
+                keyName: config.config["iac-pulumi:key_value"],
+                networkInterfaces: [
+                    {
+                        associatePublicIpAddress: true,
+                        securityGroups: [appSecurityGroup.id],
+                    },
+                ],
+                blockDeviceMappings: [{
+                    deviceName: config.config['iac-pulumi:devicename'],
+                    ebs: {
+                        volumeSize: config.config['iac-pulumi:devicesize'],
+                        volumeType: config.config['iac-pulumi:volumetype'],
+                        deleteOnTermination: config.config['iac-pulumi:deleteOnTermination']
+                    }
+                }],
+
+                iamInstanceProfile: { name: roleAttachment.name },
+
+
+
+                userData: Buffer.from(`#!/bin/bash
             echo "host=${endpoint}" >> ${envFile}
             echo "user=${config.config['iac-pulumi:username']}" >> ${envFile}
             echo "password=${config.config['iac-pulumi:password']}" >> ${envFile}
@@ -335,118 +592,122 @@ available.then(available => {
             echo "database=${config.config['iac-pulumi:db_name']}" >> ${envFile}
             echo "statsdPort=${config.config['iac-pulumi:statsdPort']}" >> ${envFile}
             echo "statsdhost=${config.config['iac-pulumi:statsdhost']}" >> ${envFile}
+            echo "TopicArn=${SNSarn}" >> ${envFile}
             sudo systemctl restart app.service
             sudo systemctl restart amazon-cloudwatch-agent
             `,).toString('base64')
 
-        }
-        );
+            }
+            );
 
-        const targetGroup = new aws.lb.TargetGroup("targetGroup", {
-            port: config.config['iac-pulumi:db_port'],
-            protocol: config.config['iac-pulumi:lbprotocol'],
-            targetType: config.config['iac-pulumi:targetIns'],
-            vpcId: myvpc.id,
-            healthCheck: {
-                path: "/healthz",
-                interval: config.config['iac-pulumi:healthzInt'],
-                timeout: config.config['iac-pulumi:healthzTime'],
-                healthyThreshold: config.config['iac-pulumi:healthzThreshold'],
-                unhealthyThreshold: config.config['iac-pulumi:unhealthzThreshold'],
-                matcher: config.config['iac-pulumi:healthzMatcher'],
-            },
-        });
-        const ec2_asg = new aws.autoscaling.Group("bar", {
-            vpcZoneIdentifiers: iam_publicSubnets,
-            desiredCapacity: config.config['iac-pulumi:desCap'],
-            minSize: config.config['iac-pulumi:autoMinSize'],
-            maxSize: config.config['iac-pulumi:autoMaxSize'],
-            targetGroupArns: [targetGroup.arn],
-            launchTemplate: {
-                id: ec2_launch_Template.id,
-            },
-            tags: [
-                {
-                    key: "Name",
-                    value: "AutoScaling Group",
-                    propagateAtLaunch: true,
+
+
+            const targetGroup = new aws.lb.TargetGroup("targetGroup", {
+                port: config.config['iac-pulumi:db_port'],
+                protocol: config.config['iac-pulumi:lbprotocol'],
+                targetType: config.config['iac-pulumi:targetIns'],
+                vpcId: myvpc.id,
+                healthCheck: {
+                    path: "/healthz",
+                    interval: config.config['iac-pulumi:healthzInt'],
+                    timeout: config.config['iac-pulumi:healthzTime'],
+                    healthyThreshold: config.config['iac-pulumi:healthzThreshold'],
+                    unhealthyThreshold: config.config['iac-pulumi:unhealthzThreshold'],
+                    matcher: config.config['iac-pulumi:healthzMatcher'],
                 },
-            ]
-        });
-
-        const scaleUpPolicy = new aws.autoscaling.Policy("asgScaleUpPolicy", {
-            adjustmentType: config.config['iac-pulumi:autoType'],
-            scalingAdjustment: config.config['iac-pulumi:autoAdj'],
-            cooldown: config.config['iac-pulumi:autoCd'],
-            policyType: config.config['iac-pulumi:autoPolicy'],
-            autoscalingGroupName: ec2_asg.name,
-        });
-
-        const scaleUpCondition = new aws.cloudwatch.MetricAlarm("scaleUpCondition", {
-            metricName: config.config['iac-pulumi:scaleMetric'],
-            namespace: config.config['iac-pulumi:scaleName'],
-            statistic: config.config['iac-pulumi:scaleAvg'],
-            period: config.config['iac-pulumi:scalePeriod'],
-            evaluationPeriods: config.config['iac-pulumi:evalPeriod'],
-            comparisonOperator: config.config['iac-pulumi:scaleComp'],
-            threshold: config.config['iac-pulumi:scaleThreshold'],
-            dimensions: {
-                AutoScalingGroupName: ec2_asg.name,
-            },
-            alarmActions: [scaleUpPolicy.arn],
-        });
-
-        const scaleDownPolicy = new aws.autoscaling.Policy("asgScaleDownPolicy", {
-            adjustmentType: config.config['iac-pulumi:adjustType'],
-            scalingAdjustment: config.config['iac-pulumi:scaleadjust'],
-            cooldown: config.config['iac-pulumi:cooldown'],
-            policyType: config.config['iac-pulumi:ptype'],
-            autoscalingGroupName: ec2_asg.name,
-        });
-
-        const scaleDownCondition = new aws.cloudwatch.MetricAlarm("scaleDownCondition", {
-            metricName: config.config['iac-pulumi:metricName'],
-            namespace: config.config['iac-pulumi:namespace'],
-            statistic: config.config['iac-pulumi:statistic'],
-            period: config.config['iac-pulumi:period'],
-            evaluationPeriods: config.config['iac-pulumi:evaluation'],
-            comparisonOperator: config.config['iac-pulumi:comparison'],
-            threshold: config.config['iac-pulumi:threshold'],
-            dimensions: {
-                AutoScalingGroupName: ec2_asg.name,
-            },
-            alarmActions: [scaleDownPolicy.arn],
-        });
-
-        const alb = new aws.lb.LoadBalancer("cloud-loadBalancer", {
-            loadBalancerType: config.config['iac-pulumi:lbTtypeapp'],
-            securityGroups: [load_bal_security.id],
-            subnets: iam_publicSubnets,
-        });
-        const listener = new aws.lb.Listener("listener", {
-            loadBalancerArn: alb.arn,
-            port: config.config['iac-pulumi:http_from_port'],
-            protocol: config.config['iac-pulumi:lbprotocol'],
-            defaultActions: [{
-                type: config.config['iac-pulumi:lbTtype'],
-                targetGroupArn: targetGroup.arn,
-            }],
-        });
-
-        const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
-        const route53Record = new aws.route53.Record("myRoute53Record",
-            {
-                name: config.config['iac-pulumi:dnsname'],
-                zoneId: hostedZone.then(zone => zone.zoneId),
-                type: config.config['iac-pulumi:type'],
-                aliases: [
+            });
+            const ec2_asg = new aws.autoscaling.Group("bar", {
+                vpcZoneIdentifiers: iam_publicSubnets,
+                desiredCapacity: config.config['iac-pulumi:desCap'],
+                minSize: config.config['iac-pulumi:autoMinSize'],
+                maxSize: config.config['iac-pulumi:autoMaxSize'],
+                targetGroupArns: [targetGroup.arn],
+                launchTemplate: {
+                    id: ec2_launch_Template.id,
+                },
+                tags: [
                     {
-                        name: alb.dnsName,
-                        zoneId: alb.zoneId,
-                        evaluateTargetHealth: config.config['iacpulumi:associatePublicIpAddress'],
-                    }
+                        key: "Name",
+                        value: "AutoScaling Group",
+                        propagateAtLaunch: true,
+                    },
                 ]
             });
-    });
-});
 
+            const scaleUpPolicy = new aws.autoscaling.Policy("asgScaleUpPolicy", {
+                adjustmentType: config.config['iac-pulumi:autoType'],
+                scalingAdjustment: config.config['iac-pulumi:autoAdj'],
+                cooldown: config.config['iac-pulumi:autoCd'],
+                policyType: config.config['iac-pulumi:autoPolicy'],
+                autoscalingGroupName: ec2_asg.name,
+            });
+
+            const scaleUpCondition = new aws.cloudwatch.MetricAlarm("scaleUpCondition", {
+                metricName: config.config['iac-pulumi:scaleMetric'],
+                namespace: config.config['iac-pulumi:scaleName'],
+                statistic: config.config['iac-pulumi:scaleAvg'],
+                period: config.config['iac-pulumi:scalePeriod'],
+                evaluationPeriods: config.config['iac-pulumi:evalPeriod'],
+                comparisonOperator: config.config['iac-pulumi:scaleComp'],
+                threshold: config.config['iac-pulumi:scaleThreshold'],
+                dimensions: {
+                    AutoScalingGroupName: ec2_asg.name,
+                },
+                alarmActions: [scaleUpPolicy.arn],
+            });
+
+            const scaleDownPolicy = new aws.autoscaling.Policy("asgScaleDownPolicy", {
+                adjustmentType: config.config['iac-pulumi:adjustType'],
+                scalingAdjustment: config.config['iac-pulumi:scaleadjust'],
+                cooldown: config.config['iac-pulumi:cooldown'],
+                policyType: config.config['iac-pulumi:ptype'],
+                autoscalingGroupName: ec2_asg.name,
+            });
+
+            const scaleDownCondition = new aws.cloudwatch.MetricAlarm("scaleDownCondition", {
+                metricName: config.config['iac-pulumi:metricName'],
+                namespace: config.config['iac-pulumi:namespace'],
+                statistic: config.config['iac-pulumi:statistic'],
+                period: config.config['iac-pulumi:period'],
+                evaluationPeriods: config.config['iac-pulumi:evaluation'],
+                comparisonOperator: config.config['iac-pulumi:comparison'],
+                threshold: config.config['iac-pulumi:threshold'],
+                dimensions: {
+                    AutoScalingGroupName: ec2_asg.name,
+                },
+                alarmActions: [scaleDownPolicy.arn],
+            });
+
+            const alb = new aws.lb.LoadBalancer("cloud-loadBalancer", {
+                loadBalancerType: config.config['iac-pulumi:lbTtypeapp'],
+                securityGroups: [load_bal_security.id],
+                subnets: iam_publicSubnets,
+            });
+            const listener = new aws.lb.Listener("listener", {
+                loadBalancerArn: alb.arn,
+                port: config.config['iac-pulumi:http_from_port'],
+                protocol: config.config['iac-pulumi:lbprotocol'],
+                defaultActions: [{
+                    type: config.config['iac-pulumi:lbTtype'],
+                    targetGroupArn: targetGroup.arn,
+                }],
+            });
+
+            const hostedZone = aws.route53.getZone({ name: config.config['iac-pulumi:dnsname'] });
+            const route53Record = new aws.route53.Record("myRoute53Record",
+                {
+                    name: config.config['iac-pulumi:dnsname'],
+                    zoneId: hostedZone.then(zone => zone.zoneId),
+                    type: config.config['iac-pulumi:type'],
+                    aliases: [
+                        {
+                            name: alb.dnsName,
+                            zoneId: alb.zoneId,
+                            evaluateTargetHealth: config.config['iacpulumi:associatePublicIpAddress'],
+                        }
+                    ]
+                });
+
+        });
+    });
+})
