@@ -116,13 +116,7 @@ available.then(available => {
     const load_bal_security = new aws.ec2.SecurityGroup("cloud-load-balancer", {
         vpcId: myvpc.id,
         ingress: [
-            {
-                fromPort: config.config['iac-pulumi:http_from_port'], //HTTP
-                toPort: config.config['iac-pulumi:http_to_port'],
-                protocol: config.config['iac-pulumi:protocol'],
-                cidrBlocks: [config.config['iac-pulumi:cidr_blocks']],
-                ipv6CidrBlocks: [config.config['iac-pulumi:ipv6_cidr_blocks']],
-            },
+
             {
                 fromPort: config.config['iac-pulumi:https_from_port'], //HTTPS
                 toPort: config.config['iac-pulumi:https_to_port'],
@@ -491,7 +485,7 @@ available.then(available => {
             role: lambdaSNSRole.arn,
             packageType: config.config['iac-pulumi:patype'],
             code: new pulumi.asset.AssetArchive({
-                ".": new pulumi.asset.FileArchive("/Users/mihirsheth/Desktop/11Assignment7/MihirSheth002743969_06_Assnt7/serverless"),
+                ".": new pulumi.asset.FileArchive("/Users/mihirsheth/Desktop/MihirSheth002743969_09 2/serverless"),
             }),
             environment: {
                 variables: {
@@ -561,6 +555,7 @@ available.then(available => {
 
             const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
 
+                name: config.config['iac-pulumi:launchName'],
                 imageId: ami.then((i) => i.id), // Your custom AMI
                 instanceType: "t2.micro",
                 keyName: config.config["iac-pulumi:key_value"],
@@ -601,7 +596,7 @@ available.then(available => {
             );
 
 
-
+////
             const targetGroup = new aws.lb.TargetGroup("targetGroup", {
                 port: config.config['iac-pulumi:db_port'],
                 protocol: config.config['iac-pulumi:lbprotocol'],
@@ -617,6 +612,7 @@ available.then(available => {
                 },
             });
             const ec2_asg = new aws.autoscaling.Group("bar", {
+                name: config.config['iac-pulumi:scalinggroup'],
                 vpcZoneIdentifiers: iam_publicSubnets,
                 desiredCapacity: config.config['iac-pulumi:desCap'],
                 minSize: config.config['iac-pulumi:autoMinSize'],
@@ -624,6 +620,7 @@ available.then(available => {
                 targetGroupArns: [targetGroup.arn],
                 launchTemplate: {
                     id: ec2_launch_Template.id,
+                    version: "$Latest"
                 },
                 tags: [
                     {
@@ -685,8 +682,10 @@ available.then(available => {
             });
             const listener = new aws.lb.Listener("listener", {
                 loadBalancerArn: alb.arn,
-                port: config.config['iac-pulumi:http_from_port'],
-                protocol: config.config['iac-pulumi:lbprotocol'],
+                port: config.config['iac-pulumi:https_from_port'],
+                protocol: config.config['iac-pulumi:lbprotocol2'],
+                sslPolicy: config.config['iac-pulumi:sslPolicy'],
+                certificateArn: config.config['iac-pulumi:certificate'],
                 defaultActions: [{
                     type: config.config['iac-pulumi:lbTtype'],
                     targetGroupArn: targetGroup.arn,
