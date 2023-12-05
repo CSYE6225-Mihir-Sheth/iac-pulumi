@@ -491,7 +491,7 @@ available.then(available => {
             role: lambdaSNSRole.arn,
             packageType: config.config['iac-pulumi:patype'],
             code: new pulumi.asset.AssetArchive({
-                ".": new pulumi.asset.FileArchive("/Users/mihirsheth/Desktop/11Assignment7/MihirSheth002743969_06_Assnt7/serverless"),
+                ".": new pulumi.asset.FileArchive("/Users/mihirsheth/Desktop/MihirSheth002743969_09 2/serverless"),
             }),
             environment: {
                 variables: {
