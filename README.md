@@ -68,7 +68,36 @@ Notes
 
 For more information on how to customize your infrastructure, refer to the Pulumi Documentation.
 
-Support
-If you encounter any issues or have questions, please file an issue on the project's issues tracker on GitHub.
+
+# Importing SSL Certificate to AWS ACM
+
+## Overview
+
+This guide provides instructions on how to import an SSL certificate into AWS Certificate Manager (ACM) using the AWS CLI. This can be useful, for example, when obtaining a certificate from an external vendor.
+
+## Prerequisites
+
+Before you begin, make sure you have the following:
+
+- AWS CLI installed and configured with the necessary permissions.
+
+## Steps
+
+### 1. Obtain SSL Certificate Files
+
+Ensure you have the necessary SSL certificate files ready. The command below assumes the following files are available:
+
+- demo_mihirsheth_me.crt: The SSL certificate.
+- mihirprivatekey.pem: The private key corresponding to the certificate.
+- demo_mihirsheth_me.ca-bundle: The certificate chain.
+
+### 2. Run ACM Import Certificate Command
+
+Use the following AWS CLI command to import the SSL certificate into AWS ACM:
+
+aws acm import-certificate \
+  --certificate fileb:///Users/mihirsheth/Documents/Certificate/demo_mihirsheth_me/demo_mihirsheth_me.crt \
+  --private-key fileb:///Users/mihirsheth/Documents/Certificate/mihirprivatekey.pem \
+  --certificate-chain fileb:///Users/mihirsheth/Documents/Certificate/demo_mihirsheth_me/demo_mihirsheth_me.ca-bundle
 
 

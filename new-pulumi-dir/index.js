@@ -561,6 +561,7 @@ available.then(available => {
 
             const ec2_launch_Template = new aws.ec2.LaunchTemplate("cloud-launch-template", {
 
+                name: config.config['iac-pulumi:launchName'],
                 imageId: ami.then((i) => i.id), // Your custom AMI
                 instanceType: "t2.micro",
                 keyName: config.config["iac-pulumi:key_value"],
@@ -601,7 +602,7 @@ available.then(available => {
             );
 
 
-
+////
             const targetGroup = new aws.lb.TargetGroup("targetGroup", {
                 port: config.config['iac-pulumi:db_port'],
                 protocol: config.config['iac-pulumi:lbprotocol'],
@@ -617,6 +618,7 @@ available.then(available => {
                 },
             });
             const ec2_asg = new aws.autoscaling.Group("bar", {
+                name: config.config['iac-pulumi:scalinggroup'],
                 vpcZoneIdentifiers: iam_publicSubnets,
                 desiredCapacity: config.config['iac-pulumi:desCap'],
                 minSize: config.config['iac-pulumi:autoMinSize'],
@@ -624,6 +626,7 @@ available.then(available => {
                 targetGroupArns: [targetGroup.arn],
                 launchTemplate: {
                     id: ec2_launch_Template.id,
+                    version: "$Latest"
                 },
                 tags: [
                     {
@@ -685,8 +688,10 @@ available.then(available => {
             });
             const listener = new aws.lb.Listener("listener", {
                 loadBalancerArn: alb.arn,
-                port: config.config['iac-pulumi:http_from_port'],
-                protocol: config.config['iac-pulumi:lbprotocol'],
+                port: config.config['iac-pulumi:https_from_port'],
+                protocol: config.config['iac-pulumi:lbprotocol2'],
+                sslPolicy: config.config['iac-pulumi:sslPolicy'],
+                certificateArn: config.config['iac-pulumi:certificate'],
                 defaultActions: [{
                     type: config.config['iac-pulumi:lbTtype'],
                     targetGroupArn: targetGroup.arn,
